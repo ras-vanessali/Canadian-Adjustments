@@ -13,8 +13,8 @@ library(readxl)
 
 
 ### Set file path and read input file
-setwd("H:/Projects/71_ CAN adjusters/201912")
-CanadaExlfile='20190829 CanadaManagement.xlsx'
+setwd("C:/Users/vanessa.li/Documents/GitHub/Canadian-Adjustments")
+CanadaExlfile='20190829CanadaManagement.xlsx'
 uploadFile = paste('CountryAdjusterImport',format(Sys.time(), "%Y%m%d%H%M"),'VL.csv',sep='')
 
 ### Set input parameters
