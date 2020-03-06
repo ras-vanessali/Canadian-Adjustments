@@ -22,7 +22,7 @@ BI.AppraisalBookCountryAdjustersCategory
 ### what sales data been used?
 - US and Canada auction sales data
 - categories in the input file
-- sales in rolling 12 months
+- pull sales data in rolling 12 months but use most recent X data points in model
 - model year in between 2008 to 2020
 - sale price greater than 10
 - M1 values greater than 0
@@ -32,6 +32,14 @@ BI.AppraisalBookCountryAdjustersCategory
  > 75% quantile(saleprice/M1value) + 2*IQR(saleprice/M1value)
  < 25% quantile(saleprice/M1value) - 2*IQR(saleprice/M1value)
  ```
+ 
+### Use at least six months data or most recent X data points
+note: 
+1) When X = 100, the program will look up the month has cumulative 100 data points from today. And we will use data up to that months. 
+This is pretend to do, reason in 2). So we do not expect to see exact 100 data been used. 
+2) We'll use the most recent months that equal or more than 6 months with at least 100 data points. Same number of months should be used on US and Canada for each schedule, making sure both uses at least 100 data points. 
+
+
 ## Regression model
 1) Run the following regression for each schedule, each sale type through a loop:
 ```
