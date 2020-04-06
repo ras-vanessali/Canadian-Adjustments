@@ -1,5 +1,5 @@
 "
-Canada Adjustments - last modified date: 08/27/2019
+Canada Adjustments - last modified date: 02/27/2020
 "
 ##################################################################################################################
 ##################################################### Input ################################################
@@ -10,12 +10,16 @@ library(dplyr)
 library(tidyr)
 library(tibble)
 library(readxl)
-
+library(lubridate)
 
 ### Set file path and read input file
 setwd("C:/Users/vanessa.li/Documents/GitHub/Canadian-Adjustments")
 CanadaExlfile='20190829CanadaManagement.xlsx'
 uploadFile = paste('CountryAdjusterImport',format(Sys.time(), "%Y%m%d%H%M"),'VL.csv',sep='')
+
+
+
+thresholdMonth = as.Date(Sys.Date()%m-% months(5)- days(day(Sys.Date())))
 
 ### Set input parameters
 # caps - global
@@ -36,7 +40,7 @@ globalId = -1
 ### Retail
 channel<-odbcConnect("production")
 DataRet<-sqlQuery(channel,"
-
+SET NOCOUNT ON
 -- Model year range (2008,2020) is decided on 5/8/2019 by Sunil T
 Declare @StartDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
 Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
@@ -61,7 +65,7 @@ Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1)
                   ,[SaleDate]  
                   ,EOMONTH(SaleDate) as EffectiveDate
                   ,[SalePrice]     
-                  ,[CurrentABCost]
+                  ,[CurrentABCostUSNA]
                   ,[M1SFUsage]    
                   ,[M1AppraisalBookPublishDate]      
                   ,M1PrecedingFmv as Fmv
@@ -81,19 +85,18 @@ Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1)
                   2610,	2612,	2609,	2839,	5,	2613,	2611,	35,	9)
                   AND SalePrice>10
                   AND [M1PrecedingFmv] >0
-                  AND [M1PrecedingFmvCanadian] >0
-                  AND M1PrecedingABCost is not NULL
+                  AND M1PrecedingABCostUSNA is not NULL
                   AND (Option15 is NULL or Option15 ='0')      
                   ) A
-                  where A.CountryCode <> 'others'                 
+                  where A.CountryCode <> 'others'                    
                   ")
 
 
 
 ### Auction
 channel<-odbcConnect("production")
-DataAuc<-sqlQuery(channel,"
-                     Declare @StartDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
+DataAuc<-sqlQuery(channel," SET NOCOUNT ON
+                    Declare @StartDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
                      Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
                      SELECT 
                      [InternetComparableId]
@@ -114,7 +117,7 @@ DataAuc<-sqlQuery(channel,"
                      ,[SalePrice]
                      ,[CurrencyCode]
                      ,[SalePriceUSD]
-                     ,[CurrentABCost]
+                     ,[CurrentABCostUSNA]
                      ,[M1SFUsage]
                      ,[M1AppraisalBookPublishDate]
                      ,[LocationState]
@@ -131,7 +134,7 @@ DataAuc<-sqlQuery(channel,"
                   2610,	2612,	2609,	2839,	5,	2613,	2611,	35,	9)
                      AND [M1PrecedingFlv] >0
                      AND SalePrice>10
-                      AND M1PrecedingABCost is not NULL
+                      AND M1PrecedingABCostUSNA is not NULL 
           
                ")
 
@@ -169,7 +172,9 @@ LM_Global <- LastMonth_Global %>% mutate(CodeCS = paste(globalId,'|')) %>% selec
 LastMonth[is.na(LastMonth)]<-''
 LastMonthconcat<- rbind(LastMonth %>% mutate(CodeCS = paste(CategoryId,SubcategoryId,sep = '|')) %>% select(CodeCS,RetailPercent,AuctionPercent),LM_Global)
 
-
+##################################################################################################################
+################################################## Join to Schedule ##############################################
+##################################################################################################################
 
 ### Read and import input file
 inputFeed <-read_excel(CanadaExlfile,sheet='In')
@@ -198,15 +203,14 @@ retail_categ <- rbind(Catlevel %>% select(Schedule,CategoryId),RbASched %>% sele
 auction_categ<- rbind(Catlevel %>% select(Schedule,CategoryId),AbRSched %>% select(Schedule,CategoryId))
 
 # join to retail data import
-CatDataRet <- merge(DataRet,retail_categ, by=c("CategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode)
-SubcatDataRet<-merge(DataRet,Subcatlevel, by=c("CategoryId","SubcategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode)
+CatDataRet <- merge(DataRet,retail_categ, by=c("CategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode,SaleDate,EffectiveDate,ModelYear)
+SubcatDataRet<-merge(DataRet,Subcatlevel, by=c("CategoryId","SubcategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode,SaleDate,EffectiveDate,ModelYear)
 Retail_modDt<-rbind(CatDataRet,SubcatDataRet)
 
 # join to auction data import
-CatDataAuc <- merge(DataAuc,auction_categ, by=c("CategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode)
-SubcatDataAuc<-merge(DataAuc,Subcatlevel, by=c("CategoryId","SubcategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode)
+CatDataAuc <- merge(DataAuc,auction_categ, by=c("CategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode,SaleDate,EffectiveDate,ModelYear)
+SubcatDataAuc<-merge(DataAuc,Subcatlevel, by=c("CategoryId","SubcategoryId")) %>% select(Schedule,CategoryId,Y,CountryCode,SaleDate,EffectiveDate,ModelYear)
 Auction_modDt<-rbind(CatDataAuc,SubcatDataAuc)
-
 
 
 #######################################################################################################################
@@ -227,6 +231,70 @@ MoMlimit <- function(last_month,current_month,limit){
   result = ifelse(is.na(last_month), current_month,pmin(upline,pmax(btline,current_month)))
   return(result)
 }
+
+#######################################################################################################################
+###################################################### Data Cleaning ##################################################
+#######################################################################################################################
+
+### Retail
+Retail_count = Retail_modDt %>%
+  group_by(Schedule,CountryCode) %>%
+  arrange(desc(SaleDate)) %>%
+  mutate(rowNum = row_number())%>%
+  group_by(Schedule,CountryCode,EffectiveDate ) %>%
+  summarise(max.rowNum = max(rowNum)) %>%
+  mutate(n = abs(max.rowNum-100)) 
+
+### find what is the month that get 100 data
+Monthof100.Retail<-merge(Retail_modDt %>%
+                            group_by(Schedule,CountryCode) %>%
+                            summarise(TotalCounts = n()),
+                         Retail_count,by=c('Schedule','CountryCode')) %>%
+  filter((TotalCounts>=100 & max.rowNum>=100) | TotalCounts<100) %>%
+  group_by(Schedule,CountryCode) %>%
+  filter(n==min(n)) %>%
+  select(Schedule,CountryCode,EffectiveDate) %>%
+  rename(DateOn100d = EffectiveDate)
+
+Monthof100.Retail.trans<-spread(Monthof100.Retail,CountryCode, DateOn100d)%>%
+  mutate(DateOn100d = pmin(CAN,USA)) %>% select(Schedule,DateOn100d)
+
+## if six month has greater than 100 data, use all 6 month, if not use up to 100
+ModelData_Retail = merge(Retail_modDt,Monthof100.Retail.trans,by='Schedule') %>%
+  filter(as.Date(EffectiveDate) >= ifelse(as.Date(DateOn100d) >=thresholdMonth,thresholdMonth,as.Date(DateOn100d))) %>%
+  select(-EffectiveDate,-DateOn100d)
+
+
+### Auction
+## give the number /count how many rows does one group have
+Auction_count = Auction_modDt %>%
+  group_by(Schedule,CountryCode) %>%
+  arrange(desc(SaleDate)) %>%
+  mutate(rowNum = row_number()) %>%
+  group_by(Schedule,CountryCode,EffectiveDate ) %>%
+  summarise(max.rowNum = max(rowNum)) %>%
+  mutate(n = abs(max.rowNum-100)) 
+
+
+### find what is the month that get 100 data
+Monthof100.Auction<-merge(Auction_modDt %>%
+                          group_by(Schedule,CountryCode) %>%
+                          summarise(TotalCounts = n()),
+                        Auction_count,by=c('Schedule','CountryCode')) %>%
+  filter((TotalCounts>=100 & max.rowNum>=100) | TotalCounts<100) %>%
+  group_by(Schedule,CountryCode) %>%
+  filter(n==min(n)) %>%
+  select(Schedule,CountryCode,EffectiveDate) %>%
+  rename(DateOn100d = EffectiveDate)
+
+Monthof100.Auction.trans<-spread(Monthof100.Auction,CountryCode, DateOn100d)%>%
+  mutate(DateOn100d = pmin(CAN,USA)) %>% select(Schedule,DateOn100d)
+
+## if six month has greater than 100 data, use all 6 month, if not use up to 100
+ModelData_Auction = merge(Auction_modDt,Monthof100.Auction.trans,by='Schedule') %>%
+  filter(as.Date(EffectiveDate) >= ifelse(as.Date(DateOn100d) >=thresholdMonth,thresholdMonth,as.Date(DateOn100d))) %>%
+  select(-EffectiveDate,-DateOn100d)
+
 
 
 #######################################################################################################################
@@ -249,7 +317,7 @@ SF_R<-matrix(0,nCat)
 ### Run model, loop through schedules
 for (j in 1:nCat){
 
-    groupData<-subset(Retail_modDt,Retail_modDt$Schedule==retail_list[j,1])
+    groupData<-subset(ModelData_Retail,ModelData_Retail$Schedule==retail_list[j,1])
     groupDataft <- groupData %>%
       filter(Y <= quantile(Y,0.75) + 2*IQR(Y) & Y>= quantile(Y,0.25) - 2*IQR(Y))
     
@@ -280,13 +348,13 @@ SF_A<-matrix(0,nCat_auc)
 ### Run model, loop through schedules
 for (j in 1:nCat_auc){
 
-  groupData_A<-subset(Auction_modDt,Auction_modDt$Schedule==auction_list[j,1])
+  groupData_A<-subset(ModelData_Auction,ModelData_Auction$Schedule==auction_list[j,1])
   groupDataft <- groupData_A %>%
     filter(Y <= quantile(Y,0.75) + 2*IQR(Y) & Y>= quantile(Y,0.25) - 2*IQR(Y))
   
   fitData<-within(groupDataft,CountryCode<-relevel(CountryCode,ref="USA"))
   
-  fitG<-lm(Y~CountryCode,data=fitData)
+  fitG<-lm(log(Y)~CountryCode,data=fitData)
   
   SF_A[j]<-exp(fitG$coefficients[2])
   
@@ -305,12 +373,12 @@ colnames(SF_A)<-c("Schedule","Auction")
 ###############################################################################################################################
 
 ### pull the number of sales in each category in CAN
-summaryAuc<-Auction_modDt %>%
+summaryAuc<-ModelData_Auction %>%
   filter(CountryCode=='CAN') %>%
   group_by(Schedule) %>%
   summarise(nAuc=n())
 
-summaryRet<-Retail_modDt %>%
+summaryRet<-ModelData_Retail %>%
   filter(CountryCode=='CAN') %>%
   group_by(Schedule) %>%
   summarise(nRet=n())
@@ -410,7 +478,13 @@ sharepage<-lastM_cap %>%
          retailDiff,  auctionDiff,cap_retail , cap_auction , chancheck_ret ,chancheck_auc,Retail,Auction) %>%
   arrange(Schedule,CategoryName,SubcategoryName)
 
+
+sharepage2<-rbind(merge(Monthof100.Retail.trans,'Retail'),merge(Monthof100.Auction.trans,'Auction')) %>%
+  mutate(OldestMonthInuse = if_else(as.Date(DateOn100d) >=thresholdMonth,thresholdMonth,as.Date(DateOn100d)))%>%
+  select(Schedule,y,DateOn100d,OldestMonthInuse) %>%
+  rename(SaleType=y,MonthOn100pts = DateOn100d)
+
 ### Export the files 
 write.csv(ExportTb,uploadFile,row.names = F)
 write.csv(sharepage,paste(Sys.Date(),'MoMSharePage_Canada.csv'))
-
+write.csv(sharepage2,paste(Sys.Date(),'MoMSharePage_Canada2.csv'))
