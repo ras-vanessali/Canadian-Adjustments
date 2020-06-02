@@ -1,7 +1,7 @@
 # Canadian-Adjustments
 This program is to calculate the Canadian adjusters for C or CS level schedules. For each schedule, this program will return one adjuster for retail and one adjuster for auction. They will be applied to the US values to get the flv and fmv on Canada.
 
-## ## Prerequistites
+## Prerequistites
 a)  You need to have R studio installed in your computer. 
 b)  Download the most recent `CanadaManagement.xlsx` from git or valuation share folder.
 c)  Install the following R libraries:
