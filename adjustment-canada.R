@@ -9,17 +9,18 @@ library(RODBC)
 library(dplyr)
 library(tidyr)
 library(tibble)
-library(readxl)
+library(xlsx)
 library(lubridate)
 
 ### Set file path and read input file
 setwd("C:/Users/vanessa.li/Documents/GitHub/Canadian-Adjustments")
 CanadaExlfile='20190829CanadaManagement.xlsx'
-uploadFile = paste('CountryAdjusterImport',format(Sys.time(), "%Y%m%d%H%M"),'VL.csv',sep='')
+uploadFile = paste('CountryAdjusterImport',format(Sys.time(), "%Y%m%d%H%M"),'VL.xlsx',sep='')
+channel<-odbcConnect("production")
 
 
-
-thresholdMonth = as.Date(Sys.Date()%m-% months(5)- days(day(Sys.Date())))
+thresholdMonth = as.Date(Sys.Date()%m-% months(2)- days(day(Sys.Date())))
+thresholddtp = 75
 
 ### Set input parameters
 # caps - global
@@ -38,7 +39,7 @@ globalId = -1
 ##################################################### Data Import ################################################
 ##################################################################################################################
 ### Retail
-channel<-odbcConnect("production")
+
 DataRet<-sqlQuery(channel,"
 SET NOCOUNT ON
 -- Model year range (2008,2020) is decided on 5/8/2019 by Sunil T
@@ -72,10 +73,10 @@ Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1)
                   ,[M1PrecedingFmv]*(isnull(M1SFUsage,1)) as M1PrecedingFmv
                   ,[M1PrecedingFmvCanadian]*(isnull(M1SFUsage,1)) as M1PrecedingFmvCanadian  
 				          ,SalePrice/([M1PrecedingFmv]*(isnull(M1SFUsage,1))) as Y  
-				          ,[IsUsedForComparables]
+				          ,[IsUsedForComparablesUSNA]
 				          ,case when CustomerId in (528,	343,	686,	546,	523,	562,	261,	337,	508,	520,	420,	519,	
                   654,	150,	699,	216,	521,	302,	95,	522,	318,	373,	515,	181,	630,	573) THEN 'CAN'
-				            when [IsUsedForComparables]='Y' THEN 'USA' else 'others' END AS 'CountryCode'
+				            when [IsUsedForComparablesUSNA]='Y' THEN 'USA' else 'others' END AS 'CountryCode'
                  
                   FROM [ras_sas].[BI].[Comparables]
                   WHERE SaleType ='Retail'
@@ -94,7 +95,7 @@ Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1)
 
 
 ### Auction
-channel<-odbcConnect("production")
+
 DataAuc<-sqlQuery(channel," SET NOCOUNT ON
                     Declare @StartDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
                      Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
@@ -169,7 +170,7 @@ LastMonth_Global<-sqlQuery(channel,"
 
 LM_Global <- LastMonth_Global %>% mutate(CodeCS = paste(globalId,'|')) %>% select(CodeCS,RetailPercent,AuctionPercent)
 
-LastMonth[is.na(LastMonth)]<-''
+#LastMonth[is.na(LastMonth)]<-''
 LastMonthconcat<- rbind(LastMonth %>% mutate(CodeCS = paste(CategoryId,SubcategoryId,sep = '|')) %>% select(CodeCS,RetailPercent,AuctionPercent),LM_Global)
 
 ##################################################################################################################
@@ -177,18 +178,18 @@ LastMonthconcat<- rbind(LastMonth %>% mutate(CodeCS = paste(CategoryId,Subcatego
 ##################################################################################################################
 
 ### Read and import input file
-inputFeed <-read_excel(CanadaExlfile,sheet='In')
-inputBorw <-read_excel(CanadaExlfile,sheet='InR')
+inputFeed <-read.xlsx(CanadaExlfile,sheetName='In')
+inputBorw <-read.xlsx(CanadaExlfile,sheetName='InR')
 
 #CatList<- rbind(inputFeed %>% select(CategoryId), inputBorw %>% select(CategoryId)) %>% distinct()
 
-application<-read_excel(CanadaExlfile,sheet='Out') 
-applBorw<-read_excel(CanadaExlfile,sheet='OutR')
+application<-data.frame(read.xlsx(CanadaExlfile,sheetName='Out'))
+applBorw<-data.frame(read.xlsx(CanadaExlfile,sheetName='OutR'))
 comb_apply <- rbind(application %>% select(Schedule,CategoryId,SubcategoryId,CategoryName,SubcategoryName),
                     applBorw %>% select(Schedule,CategoryId,SubcategoryId,CategoryName,SubcategoryName))
 
-caps_table0 <- rbind(read_excel(CanadaExlfile,sheet='Sched') %>% select(Schedule,Delta,CapsMin, CapsMax),
-  read_excel(CanadaExlfile,sheet='SchedR') %>% select(Schedule,Delta,CapsMin, CapsMax))
+caps_table0 <- rbind(read.xlsx(CanadaExlfile,sheetName='Sched',startRow=6) %>% select(Schedule,Delta,CapsMin, CapsMax),
+                     read.xlsx(CanadaExlfile,sheetName='SchedR',startRow=6) %>% select(Schedule,Delta,CapsMin, CapsMax))
 
 # split the input file into category level and subcategory level
 Catlevel<-subset(inputFeed,inputFeed$Level2 =='Category')
@@ -243,26 +244,26 @@ Retail_count = Retail_modDt %>%
   mutate(rowNum = row_number())%>%
   group_by(Schedule,CountryCode,EffectiveDate ) %>%
   summarise(max.rowNum = max(rowNum)) %>%
-  mutate(n = abs(max.rowNum-100)) 
+  mutate(n = abs(max.rowNum-thresholddtp)) 
 
 ### find what is the month that get 100 data
-Monthof100.Retail<-merge(Retail_modDt %>%
+month_thres.Retail<-merge(Retail_modDt %>%
                             group_by(Schedule,CountryCode) %>%
                             summarise(TotalCounts = n()),
                          Retail_count,by=c('Schedule','CountryCode')) %>%
-  filter((TotalCounts>=100 & max.rowNum>=100) | TotalCounts<100) %>%
+  filter((TotalCounts>=thresholddtp & max.rowNum>=thresholddtp) | TotalCounts<thresholddtp) %>%
   group_by(Schedule,CountryCode) %>%
   filter(n==min(n)) %>%
   select(Schedule,CountryCode,EffectiveDate) %>%
-  rename(DateOn100d = EffectiveDate)
+  rename(Monthback = EffectiveDate)
 
-Monthof100.Retail.trans<-spread(Monthof100.Retail,CountryCode, DateOn100d)%>%
-  mutate(DateOn100d = pmin(CAN,USA)) %>% select(Schedule,DateOn100d)
+month_thres.Retail.trans<-spread(month_thres.Retail,CountryCode, Monthback)%>%
+  mutate(Monthback = pmin(CAN,USA)) %>% select(Schedule,Monthback)
 
 ## if six month has greater than 100 data, use all 6 month, if not use up to 100
-ModelData_Retail = merge(Retail_modDt,Monthof100.Retail.trans,by='Schedule') %>%
-  filter(as.Date(EffectiveDate) >= ifelse(as.Date(DateOn100d) >=thresholdMonth,thresholdMonth,as.Date(DateOn100d))) %>%
-  select(-EffectiveDate,-DateOn100d)
+ModelData_Retail = merge(Retail_modDt,month_thres.Retail.trans,by='Schedule') %>%
+  filter(as.Date(EffectiveDate) >= ifelse(as.Date(Monthback) >=thresholdMonth,thresholdMonth,as.Date(Monthback))) %>%
+  select(-EffectiveDate,-Monthback)
 
 
 ### Auction
@@ -273,27 +274,27 @@ Auction_count = Auction_modDt %>%
   mutate(rowNum = row_number()) %>%
   group_by(Schedule,CountryCode,EffectiveDate ) %>%
   summarise(max.rowNum = max(rowNum)) %>%
-  mutate(n = abs(max.rowNum-100)) 
+  mutate(n = abs(max.rowNum-thresholddtp)) 
 
 
 ### find what is the month that get 100 data
-Monthof100.Auction<-merge(Auction_modDt %>%
+month_thres.Auction<-merge(Auction_modDt %>%
                           group_by(Schedule,CountryCode) %>%
                           summarise(TotalCounts = n()),
                         Auction_count,by=c('Schedule','CountryCode')) %>%
-  filter((TotalCounts>=100 & max.rowNum>=100) | TotalCounts<100) %>%
+  filter((TotalCounts>=thresholddtp & max.rowNum>=thresholddtp) | TotalCounts<thresholddtp) %>%
   group_by(Schedule,CountryCode) %>%
   filter(n==min(n)) %>%
   select(Schedule,CountryCode,EffectiveDate) %>%
-  rename(DateOn100d = EffectiveDate)
+  rename(Monthback = EffectiveDate)
 
-Monthof100.Auction.trans<-spread(Monthof100.Auction,CountryCode, DateOn100d)%>%
-  mutate(DateOn100d = pmin(CAN,USA)) %>% select(Schedule,DateOn100d)
+month_thres.Auction.trans<-spread(month_thres.Auction,CountryCode, Monthback)%>%
+  mutate(Monthback = pmin(CAN,USA)) %>% select(Schedule,Monthback)
 
 ## if six month has greater than 100 data, use all 6 month, if not use up to 100
-ModelData_Auction = merge(Auction_modDt,Monthof100.Auction.trans,by='Schedule') %>%
-  filter(as.Date(EffectiveDate) >= ifelse(as.Date(DateOn100d) >=thresholdMonth,thresholdMonth,as.Date(DateOn100d))) %>%
-  select(-EffectiveDate,-DateOn100d)
+ModelData_Auction = merge(Auction_modDt,month_thres.Auction.trans,by='Schedule') %>%
+  filter(as.Date(EffectiveDate) >= ifelse(as.Date(Monthback) >=thresholdMonth,thresholdMonth,as.Date(Monthback))) %>%
+  select(-EffectiveDate,-Monthback)
 
 
 
@@ -420,7 +421,10 @@ adj_output<-merge(join_brwIn,AdjusterTB %>% select(-nRet,-nAuc), by.y='Schedule'
 ##################################################### Cap, Channel, MoMLimit ################################################
 #############################################################################################################################
 #### prepare the table with caps
-caps_table <- rbind(caps_table0,c(global,Min_delta,lowerB,upperB))
+globcaps<-data.frame(global,Min_delta,lowerB,upperB)
+names(globcaps)<-names(caps_table0)
+
+caps_table <- rbind(caps_table0,globcaps)
 join_cap <- merge(adj_output,caps_table,by='Schedule',all.x=T)
 
 ### CAP the adjusters to lower and upper bounds 
@@ -469,6 +473,7 @@ ExportTb <-lastM_cap %>%
   rename(retail=retail_final,auction=auction_final) %>%
   select(CategoryId,SubcategoryId,retail,auction) %>%
   mutate(CountryAdjusterTypeID=1)
+ExportTb[is.na(ExportTb)]<-''
 
 ### Share page
 sharepage<-lastM_cap %>%
@@ -478,13 +483,12 @@ sharepage<-lastM_cap %>%
          retailDiff,  auctionDiff,cap_retail , cap_auction , chancheck_ret ,chancheck_auc,Retail,Auction) %>%
   arrange(Schedule,CategoryName,SubcategoryName)
 
-
-sharepage2<-rbind(merge(Monthof100.Retail.trans,'Retail'),merge(Monthof100.Auction.trans,'Auction')) %>%
-  mutate(OldestMonthInuse = if_else(as.Date(DateOn100d) >=thresholdMonth,thresholdMonth,as.Date(DateOn100d)))%>%
-  select(Schedule,y,DateOn100d,OldestMonthInuse) %>%
-  rename(SaleType=y,MonthOn100pts = DateOn100d)
+sharepage2<-rbind(merge(month_thres.Retail.trans,'Retail'),merge(month_thres.Auction.trans,'Auction')) %>%
+  mutate(OldestMonthInuse = if_else(as.Date(Monthback) >=thresholdMonth,thresholdMonth,as.Date(Monthback)))%>%
+  select(Schedule,y,OldestMonthInuse) %>%
+  rename(SaleType=y)
 
 ### Export the files 
-write.csv(ExportTb,uploadFile,row.names = F)
-write.csv(sharepage,paste(Sys.Date(),'MoMSharePage_Canada.csv'))
-write.csv(sharepage2,paste(Sys.Date(),'MoMSharePage_Canada2.csv'))
+write.xlsx(ExportTb,uploadFile,sheetName='Sheet1',row.names = F)
+write.xlsx2(as.data.frame(sharepage),file = paste(Sys.Date(),'MoMSharePage_Canada.xlsx'), sheetName = 'SharePage1',row.names = F)
+write.xlsx2(as.data.frame(sharepage2),file = paste(Sys.Date(),'MoMSharePage_Canada.xlsx'), sheetName = 'SharePage2',append=T,row.names = F)
