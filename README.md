@@ -1,7 +1,7 @@
 # Canadian-Adjustments
 This program is to calculate the Canadian adjusters for C or CS level schedules. For each schedule, this program will return one adjuster for retail and one adjuster for auction. They will be applied to the US values to get the flv and fmv on Canada.
 
-## ## Prerequistites
+## Prerequistites
 a)  You need to have R studio installed in your computer. 
 b)  Download the most recent `CanadaManagement.xlsx` from git or valuation share folder.
 c)  Install the following R libraries:
@@ -35,9 +35,9 @@ BI.AppraisalBookCountryAdjustersCategory
  
 ### Use at least six months data or most recent X data points
 note: 
-1) When X = 100, the program will look up the month has cumulative 100 data points from today. And we will use data up to that months. 
-This is pretend to do, reason in 2). So we do not expect to see exact 100 data been used. 
-2) We'll use the most recent months that equal or more than 6 months with at least 100 data points. Same number of months should be used on US and Canada for each schedule, making sure both uses at least 100 data points. 
+1) When X = 75, the program will look up the month has cumulative 75 data points from today. And we will use data up to that months. 
+This is pretend to do, reason in 2). So we do not expect to see exact 75 data been used. 
+2) We'll use the most recent months that equal or more than 3 months with at least 75 data points. Same number of months should be used on US and Canada for each schedule, making sure both uses at least 75 data points. 
 
 
 ## Regression model
