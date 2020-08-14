@@ -14,8 +14,8 @@ library(lubridate)
 
 ### Set file path and read input file
 setwd("C:/Users/vanessa.li/Documents/GitHub/Canadian-Adjustments")
-CanadaExlfile='20190829CanadaManagement.xlsx'
-uploadFile = paste('CountryAdjusterImport',format(Sys.time(), "%Y%m%d%H%M"),'VL.xlsx',sep='')
+CanadaExlfile='20200727 CanadaManagement.xlsx'
+uploadFile = paste('CountryAdjusterImport',format(Sys.time(), "%Y%m%d%H%M"),'VL.csv',sep='')
 channel<-odbcConnect("production")
 
 
@@ -38,138 +38,19 @@ globalId = -1
 ##################################################################################################################
 ##################################################### Data Import ################################################
 ##################################################################################################################
+read_dataload<-parse('dataread_CAN.r')
+eval(read_dataload)
 ### Retail
-
-DataRet<-sqlQuery(channel,"
-SET NOCOUNT ON
--- Model year range (2008,2020) is decided on 5/8/2019 by Sunil T
-Declare @StartDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
-Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
-       
-    select * from(            
-                  SELECT 
-                  [CustomerId]  
-                  ,CustomerName  
-                  ,[CustomerAssetId]     
-                  ,[EquipmentTypeId]
-                  ,[CategoryId]
-                  ,[CategoryName]
-                  ,[SubcategoryId]
-                  ,[SubcategoryName]
-                  ,[MakeId]
-                  ,[MakeName]
-                  ,[ModelId]
-                  ,[ModelName]
-                  ,[ModelYear]    
-                  ,[MilesHours]
-                  ,[MilesHoursCode]
-                  ,[SaleDate]  
-                  ,EOMONTH(SaleDate) as EffectiveDate
-                  ,[SalePrice]     
-                  ,[CurrentABCostUSNA]
-                  ,[M1SFUsage]    
-                  ,[M1AppraisalBookPublishDate]      
-                  ,M1PrecedingFmv as Fmv
-                  ,[M1PrecedingFmv]*(isnull(M1SFUsage,1)) as M1PrecedingFmv
-                  ,[M1PrecedingFmvCanadian]*(isnull(M1SFUsage,1)) as M1PrecedingFmvCanadian  
-				          ,SalePrice/([M1PrecedingFmv]*(isnull(M1SFUsage,1))) as Y  
-				          ,[IsUsedForComparablesUSNA]
-				          ,case when CustomerId in (528,	343,	686,	546,	523,	562,	261,	337,	508,	520,	420,	519,	
-                  654,	150,	699,	216,	521,	302,	95,	522,	318,	373,	515,	181,	630,	573) THEN 'CAN'
-				            when [IsUsedForComparablesUSNA]='Y' THEN 'USA' else 'others' END AS 'CountryCode'
-                 
-                  FROM [ras_sas].[BI].[Comparables]
-                  WHERE SaleType ='Retail'
-                  AND Modelyear between 2008 and 2020
-                  AND SaleDate > @StartDate AND SaleDate<=@EndDate
-                  AND CategoryId in  (30,	6,	313,	316,	15,	29,	2525,	14,	315,	360,	2509,	451,	27,	28,	23,	362,	2616,	2614,	
-                  2610,	2612,	2609,	2839,	5,	2613,	2611,	35,	9)
-                  AND SalePrice>10
-                  AND [M1PrecedingFmv] >0
-                  AND M1PrecedingABCostUSNA is not NULL
-                  AND (Option15 is NULL or Option15 ='0')      
-                  ) A
-                  where A.CountryCode <> 'others'                    
-                  ")
-
-
-
+DataRet<-sqlQuery(channel,salesdt_ret)
 ### Auction
-
-DataAuc<-sqlQuery(channel," SET NOCOUNT ON
-                    Declare @StartDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
-                     Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
-                     SELECT 
-                     [InternetComparableId]
-                     ,[EquipmentTypeId]
-                     ,[CategoryId]
-                     ,[CategoryName]
-                     ,[SubcategoryId]
-                     ,[SubcategoryName]
-                     ,[MakeId]
-                     ,[MakeName]
-                     ,[ModelId]
-                     ,[ModelName]
-                     ,[ModelYear]    
-                     ,[MilesHours]
-                     ,[MilesHoursCode]
-                     ,[SaleDate]
-                     ,EOMONTH(SaleDate) as EffectiveDate
-                     ,[SalePrice]
-                     ,[CurrencyCode]
-                     ,[SalePriceUSD]
-                     ,[CurrentABCostUSNA]
-                     ,[M1SFUsage]
-                     ,[M1AppraisalBookPublishDate]
-                     ,[LocationState]
-                     ,[CountryCode]
-                     ,[M1PrecedingFlv]*isnull(M1SFUsage,1) AS [M1PrecedingFlv]
-                     ,[SalePriceUSD]/([M1PrecedingFlv]*isnull(M1SFUsage,1)) as Y
-                    
-                  
-                     FROM [ras_sas].[BI].[AuctionSales]
-                     WHERE CountryCode in ('CAN','USA') 
-                     AND Modelyear between 2008 and 2020
-                     AND SaleDate > @StartDate AND SaleDate<=@EndDate
-                     AND CategoryId in  (30,	6,	313,	316,	15,	29,	2525,	14,	315,	360,	2509,	451,	27,	28,	23,	362,	2616,	2614,	
-                  2610,	2612,	2609,	2839,	5,	2613,	2611,	35,	9)
-                     AND [M1PrecedingFlv] >0
-                     AND SalePrice>10
-                      AND M1PrecedingABCostUSNA is not NULL 
-          
-               ")
+DataAuc<-sqlQuery(channel,salesdt_auc)
 
 
 ### Last Month
-channel<-odbcConnect("production")
-LastMonth<-sqlQuery(channel,"
-      Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-2, -1) AS date)
-      SELECT
-       [CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[RetailPercent]
-      ,[AuctionPercent]
-      FROM [ras_sas].[BI].[AppraisalBookCountryAdjustersCategory]
-      WHERE [DateAppraisalBookPublish]=@EndDate and IsGlobal=0
-      ")
-
-LastMonth_Global<-sqlQuery(channel,"
-      Declare @EndDate Date =CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-2, -1) AS date)
-      SELECT top 1
-       [CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[RetailPercent]
-      ,[AuctionPercent]
-      FROM [ras_sas].[BI].[AppraisalBookCountryAdjustersCategory]
-      WHERE [DateAppraisalBookPublish]=@EndDate and IsGlobal=1
-      ")
+LastMonth<-sqlQuery(channel,lastm_sched)
+LastMonth_Global<-sqlQuery(channel,lastm_glob)
 
 LM_Global <- LastMonth_Global %>% mutate(CodeCS = paste(globalId,'|')) %>% select(CodeCS,RetailPercent,AuctionPercent)
-
 #LastMonth[is.na(LastMonth)]<-''
 LastMonthconcat<- rbind(LastMonth %>% mutate(CodeCS = paste(CategoryId,SubcategoryId,sep = '|')) %>% select(CodeCS,RetailPercent,AuctionPercent),LM_Global)
 
@@ -441,6 +322,11 @@ MinDelta<-Cap_Canada %>%
          chancheck_auc = cap_auction - move_auc) %>%
   select(-delta_ret, -delta_auc,  -move_ret,-move_auc)
 
+""""""
+#MinDelta<-Cap_Canada %>%
+#  mutate(chancheck_ret = ifelse(cap_auction-cap_retail > as.numeric(Delta), cap_auction-as.numeric(Delta), cap_retail),
+#         chancheck_auc = cap_auction)
+
 
 ### Join to the application file 
 
@@ -480,7 +366,7 @@ sharepage<-lastM_cap %>%
   mutate(retailDiff = retail_final-RetailPercent,
          auctionDiff = auction_final-AuctionPercent) %>%
   select(Schedule,CategoryName,SubcategoryName, RetailPercent, AuctionPercent, retail_final, auction_final,    
-         retailDiff,  auctionDiff,cap_retail , cap_auction , chancheck_ret ,chancheck_auc,Retail,Auction) %>%
+         retailDiff,  auctionDiff, chancheck_ret ,chancheck_auc,cap_retail , cap_auction,Retail,Auction) %>%
   arrange(Schedule,CategoryName,SubcategoryName)
 
 sharepage2<-rbind(merge(month_thres.Retail.trans,'Retail'),merge(month_thres.Auction.trans,'Auction')) %>%
@@ -489,6 +375,6 @@ sharepage2<-rbind(merge(month_thres.Retail.trans,'Retail'),merge(month_thres.Auc
   rename(SaleType=y)
 
 ### Export the files 
-write.xlsx(ExportTb,uploadFile,sheetName='Sheet1',row.names = F)
+write.csv(ExportTb,uploadFile,row.names = F)
 write.xlsx2(as.data.frame(sharepage),file = paste(Sys.Date(),'MoMSharePage_Canada.xlsx'), sheetName = 'SharePage1',row.names = F)
 write.xlsx2(as.data.frame(sharepage2),file = paste(Sys.Date(),'MoMSharePage_Canada.xlsx'), sheetName = 'SharePage2',append=T,row.names = F)
